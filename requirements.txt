@@ -1,0 +1,8 @@
+telethon~=1.36.0
+python-telegram-bot~=21.4
+google-auth
+google-auth-oauthlib
+google-auth-httplib2
+google-api-python-client
+requests~=2.32.3
+load_dotenv
