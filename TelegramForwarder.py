@@ -7,10 +7,35 @@ from dotenv import load_dotenv
 import requests
 from telethon import events
 from telethon.sync import TelegramClient
+import pandas as pd
 
 load_dotenv()
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 SOURCE_IDS = os.getenv("SOURCE_IDS")
+CSV_FILE = os.getenv("CSV_FILE")
+
+
+def export_message(sender, chat_title, message_text, message_time):
+    # Prepare data to log
+    data = {
+        'Sender': [sender],
+        'Channel': [chat_title],
+        'Message': [message_text],
+        'Timestamp': [message_time]
+    }
+
+    # Create a DataFrame
+    df = pd.DataFrame(data)
+
+    # Check if the CSV file exists
+    if os.path.exists(CSV_FILE):
+        # Append to existing CSV
+        df.to_csv(CSV_FILE, mode='a', header=False, index=False, encoding='utf-8-sig')
+    else:
+        # Create new CSV
+        df.to_csv(CSV_FILE, mode='w', header=True, index=False, encoding='utf-8-sig')
+    print("Write data done...")
+
 
 class TelegramForwarder:
     def __init__(self, api_id, api_hash, phone_number):
@@ -81,8 +106,8 @@ class TelegramForwarder:
             chat_title = (await event.get_chat()).title
             message_time = event.message.date.strftime('%Y-%m-%d %H:%M:%S')
             # Encode the message and chat title
-            encoded_message = urllib.parse.quote(message_text)
-            encoded_chat_title = urllib.parse.quote(chat_title)
+            encoded_message = urllib.parse.quote(message_text.decode('utf-8'))
+            encoded_chat_title = urllib.parse.quote(chat_title.decode('utf-8'))
 
             url = f"{WEBHOOK_URL}?chat_name={encoded_chat_title}&message={encoded_message}&timestamp={message_time}"
 
@@ -99,6 +124,26 @@ class TelegramForwarder:
                     f'An error occurred while trying to forward the message from "{chat_title}" to Google Sheets:')
                 print(e)
                 print(traceback.format_exc())
+
+        print("Listening for new messages...")
+        await self.client.run_until_disconnected()
+
+    async def forward_messages_to_csv(self, source_chat_ids):
+        await self.client.connect()
+
+        if not await self.client.is_user_authorized():
+            await self.client.send_code_request(self.phone_number)
+            await self.client.sign_in(self.phone_number, input('Enter the code: '))
+
+        @self.client.on(events.NewMessage(chats=source_chat_ids))
+        async def handler(event):
+            message_text = event.message.message
+            chat_title = (await event.get_chat()).title
+            message_time = event.message.date.strftime('%Y-%m-%d %H:%M:%S')
+            sender = event.message.sender_id
+
+            # Log to CSV
+            export_message(sender, chat_title, message_text, message_time)
 
         print("Listening for new messages...")
         await self.client.run_until_disconnected()
@@ -141,6 +186,7 @@ async def main():
     print("2. Forward Messages by input")
     print("3. Forward Messages Default")
     print("4. Forward Messages to GG Sheet")
+    print("5. Forward Messages to file csv")
 
     choice = input("Enter your choice: ")
 
@@ -162,6 +208,10 @@ async def main():
     elif choice == "4":
         source_chat_ids = list(map(int, SOURCE_IDS.split(',')))
         await forwarder.forward_messages_to_google_sheet(source_chat_ids)
+
+    elif choice == "5":
+        source_chat_ids = list(map(int, SOURCE_IDS.split(',')))
+        await forwarder.forward_messages_to_csv(source_chat_ids)
 
     else:
         print("Invalid choice")
